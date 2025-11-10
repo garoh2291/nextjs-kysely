@@ -11,9 +11,9 @@ export default withAuth(
       return NextResponse.redirect(new URL("/", req.url));
     }
 
-    // Allow access to home page for both authenticated and unauthenticated users
-    if (pathname === "/") {
-      return NextResponse.next();
+    // If user is not authenticated and trying to access protected routes, redirect to signin
+    if (!token && pathname !== "/signin") {
+      return NextResponse.redirect(new URL("/signin", req.url));
     }
 
     return NextResponse.next();
@@ -30,11 +30,6 @@ export default withAuth(
 
         // Allow access to API routes
         if (pathname.startsWith("/api")) {
-          return true;
-        }
-
-        // Allow access to home page (route groups will handle auth)
-        if (pathname === "/") {
           return true;
         }
 
