@@ -1,0 +1,163 @@
+---
+alwaysApply: true
+---
+
+# Zulal Multi-Tenant Retail Marketplace - Cursor Rules
+
+## Database & Multi-Tenancy Rules
+
+### Multi-Tenant Data Access
+
+- **ALWAYS** use Row-Level Security (RLS) context when querying tenant-scoped data
+- **MANDATORY**: Set session context before database operations: `set_session_context(tenant_id, user_id)`
+- Use helper functions: `current_tenant_id()`, `current_user_id()` in queries
+- **NEVER** bypass tenant isolation - all tenant-scoped tables must filter by `tenant_id = current_tenant_id()`
+- User-tenant relationships are managed through `user_tenant` table with roles: `retailer`, `brand`, `admin`, `platform`
+
+### Database Patterns & Conventions
+
+- **UUID Primary Keys**: All tables use UUID primary keys - never use auto-incrementing integers
+- **Audit Fields**: Every table MUST include: `created_at`, `created_by`, `updated_at`, `updated_by`
+- **Soft Deletion**: Use `deleted_at`, `deleted_by` fields instead of hard deletes
+- **JSONB Metadata**: Use `metadata` and `settings` JSONB fields for extensible attributes
+- **Dual Currency**: Store monetary amounts in both `amount` (numeric) and `amount_cents` (integer) formats
+- **Polymorphic Relations**: Use `resource_type` + `resource_id` pattern for generic relationships (notes, notifications, status_events)
+
+### Entity Relationships & Hierarchy
+
+```
+Tenant (top-level org)
+├── User_Tenant (user roles per tenant)
+├── Customer (business entities within tenant)
+│   ├── Brand (customer's product brands)
+│   ├── Store (physical/virtual locations)
+│   ├── Address (customer addresses)
+│   └── Payment_Method (billing methods)
+├── Order (campaigns/subscriptions/products)
+│   ├── Order_Item (products/services in order)
+│   ├── Campaign_Order (marketing campaigns)
+│   └── Subscription_Order (recurring services)
+├── Budget → Budget_Item → Invoice → Invoice_Item
+└── Platform_Connection → Platform_Campaign
+```
+
+## Business Logic Rules
+
+### Account Types & Roles
+
+- `retailer`: Default role, operates stores, places orders
+- `brand`: Manages product brands, participates in campaigns
+- `admin`: Tenant administration privileges
+- `platform`: System-level access across tenants
+
+### Order Types & Specializations
+
+- **Base Order**: Generic order entity with `order_type` enum
+- **Campaign_Order**: Marketing campaigns with budget tracking, metrics (impressions, clicks, conversions)
+- **Subscription_Order**: Recurring services with billing intervals
+- **Order_Item**: Can reference either `product_id` OR `service_catalog_id` (never both)
+
+### Marketing Campaign Flow
+
+1. **Platform**: External service (Facebook, Google, TikTok, etc.)
+2. **Platform_Connection**: Authenticated connection to platform
+3. **Platform_Artifact**: Platform-specific objects (campaigns, ad sets, ads)
+4. **Platform_Campaign**: Actual running campaigns
+5. **Campaign_Order**: Internal order representation with budget/metrics
+
+### Financial Management
+
+- **Budget**: Top-level financial allocation with participants
+- **Budget_Item**: Line items linking to campaigns or invoices
+- **Invoice**: Billing documents with Stripe integration
+- **Currency_Conversion**: Multi-currency support with exchange rates
+
+## Integration Rules
+
+### Stripe Integration
+
+- **Customer**: `stripe_customer_id` for billing
+- **Product**: `stripe_product_id` for catalog sync
+- **Price**: `stripe_price_id` for pricing models
+- **Invoice**: `stripe_invoice_id`, `stripe_payment_intent_id` for payments
+- **Subscription**: `stripe_subscription_id` for recurring billing
+
+### Customer.io Integration
+
+- **User**: `cio_id` for email marketing
+- **Email_Preference**: Subscription management per tenant
+- **Customer_Event**: Track user actions for automated campaigns
+- **Notification**: Email delivery with Customer.io tracking IDs
+
+### External Platform APIs
+
+- **API_Credential**: Encrypted token storage for platform connections
+- **Webhook_Event**: Process incoming events from external services
+- **Platform**: Supported marketing platforms with capabilities
+
+## Code Implementation Rules
+
+### Database Queries
+
+- **ALWAYS** include `tenant_id` filters in WHERE clauses for tenant-scoped tables
+- Use prepared statements with proper parameter binding
+- Implement proper error handling for RLS policy violations
+- Use transactions for multi-table operations
+- Index on `tenant_id` + frequently queried columns
+
+### API Development
+
+- **Session Management**: Validate and set tenant context on every request
+- **Permission Checks**: Verify user has appropriate role/permissions for actions
+- **Rate Limiting**: Use `rate_limit` table for API throttling
+- **Audit Logging**: Record all significant actions in `audit_log` table
+- **Webhook Processing**: Handle external service events asynchronously
+
+### Security Requirements
+
+- **Input Validation**: Validate all user inputs against database constraints
+- **Permission System**: Use `permission`, `permission_group`, `authorization` tables
+- **Token Security**: Encrypt sensitive API credentials
+- **Audit Trail**: Comprehensive logging with actor tracking
+- **Data Isolation**: Strict tenant separation via RLS policies
+
+## Development Patterns
+
+### Error Handling
+
+- Return user-friendly error messages
+- Log detailed errors with correlation IDs
+- Handle RLS policy violations gracefully
+- Implement proper fallbacks for external service failures
+
+### Performance Considerations
+
+- Use database functions for complex tenant-scoped queries
+- Implement caching for frequently accessed tenant data
+- Consider partitioning large tables by tenant_id
+- Use materialized views for complex reporting queries
+
+### Testing Patterns
+
+- Test multi-tenant data isolation thoroughly
+- Verify RLS policies prevent cross-tenant access
+- Mock external service integrations (Stripe, Customer.io)
+- Test permission system edge cases
+
+## Naming Conventions
+
+- **Tables**: snake_case, descriptive names
+- **Columns**: snake_case, avoid abbreviations
+- **Enums**: lowercase with underscores
+- **Functions**: snake_case with clear purpose
+- **Indexes**: descriptive names indicating purpose
+
+## Data Migration Rules
+
+- **NEVER** modify existing columns without proper migration strategy
+- Use `metadata` JSONB fields for new attributes when possible
+- Maintain backward compatibility during schema changes
+- Test migrations on production-like data volumes
+- Always include rollback procedures
+
+Remember: This is a complex multi-tenant system with sophisticated business relationships. Always consider the impact of changes on tenant isolation, data consistency, and external integrations.
